@@ -210,13 +210,29 @@ class OrderService:
         await self.db.commit()
 
         # --- Step 10: Return ---
-        return self._order_to_response(order, product)
+        return self._order_to_response(order, product.sku, req.quantity)
 
     async def get_order(self, order_id: str) -> Order | None:
         """Fetch an order by ID."""
-        stmt = select(Order).where(Order.id == order_id)
+        from sqlalchemy.orm import selectinload
+        stmt = select(Order).where(Order.id == order_id).options(selectinload(Order.items))
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def simulate_payment(self, order_id: str) -> dict:
+        """Simulate a successful Razorpay payment to trigger the rest of the flow."""
+        order = await self.get_order(order_id)
+        if not order:
+            return {"success": False, "error": "Order not found"}
+        
+        if order.status != OrderStatus.CREATED.value:
+            return {"success": False, "error": f"Cannot pay order in status {order.status}"}
+            
+        order.transition_to(OrderStatus.CAPTURED)
+        await self.db.commit()
+        
+        logger.info("Simulated payment successful", order_id=order_id)
+        return {"success": True, "order_id": order_id, "status": "captured"}
 
     async def get_order_by_razorpay_id(self, razorpay_order_id: str) -> Order | None:
         """Fetch an order by Razorpay order ID."""
@@ -227,7 +243,8 @@ class OrderService:
     # --- Private helpers ---
 
     async def _check_idempotency(self, key: str) -> Order | None:
-        stmt = select(Order).where(Order.idempotency_key == key)
+        from sqlalchemy.orm import selectinload
+        stmt = select(Order).where(Order.idempotency_key == key).options(selectinload(Order.items))
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -236,16 +253,16 @@ class OrderService:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    def _order_to_response(self, order: Order, product: Product | None = None) -> OrderResponse:
+    def _order_to_response(self, order: Order, sku: str = "", quantity: int = 0) -> OrderResponse:
         return OrderResponse(
             success=True,
             order_id=order.id,
             razorpay_order_id=order.razorpay_order_id or "",
             agent_id=order.agent_id,
-            sku=order.items[0].sku if order.items else "",
-            quantity=order.items[0].quantity if order.items else 0,
+            sku=sku,
+            quantity=quantity,
             total_amount_paise=order.total_amount_paise,
-            total_display=f"₹{order.total_amount_paise / 100:,.2f}",
+            total_display=f"Rs.{order.total_amount_paise / 100:,.2f}",
             currency=order.currency,
             status=order.status,
             receipt=order.receipt,

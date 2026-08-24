@@ -69,13 +69,15 @@ class RazorpayClient:
             }
 
         try:
+            import asyncio
             order_data = {
                 "amount": amount_paise,
                 "currency": currency,
                 "receipt": receipt,
                 "notes": notes or {},
             }
-            order = client.order.create(data=order_data)
+            # Run synchronous SDK in thread pool to avoid blocking async event loop
+            order = await asyncio.to_thread(client.order.create, data=order_data)
             logger.info("Razorpay order created", order_id=order.get("id"), amount=amount_paise)
             return order
         except Exception as e:

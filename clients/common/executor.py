@@ -39,17 +39,49 @@ async def execute_tool(
                 "signed_intent": "",  # Demo mode — signature optional
             }
             resp = await client.post("/orders", json=payload)
+            try:
+                data = resp.json()
+            except Exception:
+                return {"success": False, "error": {"code": "SERVER_ERROR", "reason": f"HTTP {resp.status_code}: {resp.text[:200]}"}}
             if resp.status_code == 403:
-                return resp.json().get("detail", resp.json())
-            return resp.json()
+                return data.get("detail", data)
+            return data
 
         elif tool_name == "get_payment_status":
             resp = await client.get(f"/orders/{arguments['order_id']}")
-            return resp.json()
+            try:
+                return resp.json()
+            except Exception:
+                return {"error": f"HTTP {resp.status_code}"}
 
         elif tool_name == "get_upsell":
             resp = await client.get(f"/upsells/{arguments['order_id']}")
-            return resp.json()
+            try:
+                return resp.json()
+            except Exception:
+                return {"error": f"HTTP {resp.status_code}"}
+
+        elif tool_name == "request_budget_increase":
+            payload = {
+                "requested_amount_paise": arguments["requested_amount_paise"],
+                "rationale": arguments["rationale"],
+            }
+            resp = await client.post(f"/mandates/{mandate_id}/request_budget_increase", json=payload)
+            try:
+                data = resp.json()
+                if resp.status_code == 400:
+                    return data.get("detail", data)
+                return data
+            except Exception:
+                return {"error": f"HTTP {resp.status_code}"}
+                
+        elif tool_name == "simulate_payment":
+            payload = {"order_id": arguments["order_id"]}
+            resp = await client.post("/orders/simulate_payment", json=payload)
+            try:
+                return resp.json()
+            except Exception:
+                return {"error": f"HTTP {resp.status_code}"}
 
         else:
             return {"error": f"Unknown tool: {tool_name}"}

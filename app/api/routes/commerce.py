@@ -59,3 +59,19 @@ async def get_order(
         total_amount_paise=order.total_amount_paise,
         currency=order.currency,
     )
+
+from pydantic import BaseModel
+class SimulatePaymentRequest(BaseModel):
+    order_id: str
+
+@router.post("/simulate_payment")
+async def simulate_payment(
+    req: SimulatePaymentRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Simulate a successful payment for an order."""
+    service = OrderService(db)
+    result = await service.simulate_payment(req.order_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result

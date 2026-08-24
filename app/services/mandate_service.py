@@ -13,7 +13,9 @@ from app.db.models.mandate import Mandate
 from app.schemas.mandates import CreateMandateRequest, MandateResponse, MandateScope
 from app.core.security import CryptoService
 from app.core.exceptions import AgenticCommerceError
+from app.core.logging import get_logger
 
+logger = get_logger("mandate_service")
 
 class MandateService:
     """Manage agent mandates — the authorization contracts from human principals."""
@@ -109,3 +111,40 @@ class MandateService:
             return MandateScope(**scope_dict)
         except Exception:
             return MandateScope()
+
+    async def request_budget_increase(self, mandate_id: str, requested_amount_paise: int, rationale: str) -> dict:
+        """
+        Agent-to-Agent negotiation. 
+        Procurement Agent asks Finance Agent (LLM) for a budget increase.
+        """
+        mandate = await self.get_mandate(mandate_id)
+        if mandate is None or not mandate.is_active:
+            return {"success": False, "error": "Mandate not found or inactive"}
+
+        # Simulate Finance Agent LLM Evaluation
+        # In a real app, this would use the Groq client. We will do a lightweight mock logic
+        # that approves if the rationale is reasonable and amount is <= Rs 15,000 (1500000 paise).
+        logger.info(
+            "Finance Agent evaluating budget request", 
+            requested_amount=requested_amount_paise, 
+            rationale=rationale
+        )
+
+        if requested_amount_paise <= 1500000:
+            # Approved!
+            mandate.financial_ceiling_paise = requested_amount_paise
+            await self.db.commit()
+            logger.info("Finance Agent APPROVED budget increase")
+            return {
+                "success": True, 
+                "approved": True, 
+                "new_budget_paise": requested_amount_paise,
+                "message": f"Finance Agent approved budget increase to Rs.{requested_amount_paise/100:,.2f}"
+            }
+        else:
+            logger.info("Finance Agent REJECTED budget increase")
+            return {
+                "success": True, 
+                "approved": False, 
+                "message": "Finance Agent denied request. Amount exceeds maximum allowable top-up."
+            }

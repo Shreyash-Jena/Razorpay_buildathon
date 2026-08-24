@@ -66,3 +66,23 @@ async def revoke_mandate(
         raise HTTPException(status_code=404, detail="Mandate not found")
     await db.commit()
     return {"success": True, "message": "Mandate revoked."}
+
+from pydantic import BaseModel
+class BudgetIncreaseRequest(BaseModel):
+    requested_amount_paise: int
+    rationale: str
+
+@router.post("/{mandate_id}/request_budget_increase")
+async def request_budget_increase(
+    mandate_id: str,
+    req: BudgetIncreaseRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Agent appeals to Finance for a budget increase."""
+    service = MandateService(db)
+    result = await service.request_budget_increase(
+        mandate_id, req.requested_amount_paise, req.rationale
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
