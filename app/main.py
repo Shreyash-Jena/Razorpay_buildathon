@@ -71,6 +71,7 @@ def create_app() -> FastAPI:
     from app.api.routes.audit import router as audit_router
     from app.api.routes.webhooks import router as webhook_router
     from app.api.routes.webhooks import upsell_router
+    from app.api.routes.checkout import router as checkout_router
 
     app.include_router(health_router)
     app.include_router(catalog_router)
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(audit_router)
     app.include_router(webhook_router)
     app.include_router(upsell_router)
+    app.include_router(checkout_router)
 
     # Admin routes
     from app.api.routes.admin import router as admin_router

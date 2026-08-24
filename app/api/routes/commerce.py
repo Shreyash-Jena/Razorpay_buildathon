@@ -61,6 +61,25 @@ async def get_order(
     )
 
 from pydantic import BaseModel
+
+class VerifyPaymentRequest(BaseModel):
+    order_id: str
+    razorpay_payment_id: str
+    razorpay_order_id: str
+    razorpay_signature: str
+
+@router.post("/verify_payment")
+async def verify_payment(
+    req: VerifyPaymentRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Verify frontend checkout payment."""
+    service = OrderService(db)
+    result = await service.verify_payment(req.order_id, req.razorpay_payment_id, req.razorpay_order_id, req.razorpay_signature)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
 class SimulatePaymentRequest(BaseModel):
     order_id: str
 

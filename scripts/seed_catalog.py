@@ -224,7 +224,7 @@ async def seed_all(db: AsyncSession) -> dict:
     # OpenAI agent — ₹5,000 budget, keyboards + mouse
     openai_priv, openai_pub = CryptoService.generate_keypair()
     openai_scope = json.dumps({"sku": [], "category": ["mechanical-keyboards", "mouse", "cables"], "vendor": []})
-    openai_mandate_id = str(uuid.uuid4())
+    openai_mandate_id = "b7042ac0-1c11-446f-b3d2-3ad050026697" # Deterministic for testing
     canonical = CryptoService.build_mandate_canonical({
         "agent_id": "openai-demo-agent",
         "principal_id": "human-principal",
@@ -252,7 +252,7 @@ async def seed_all(db: AsyncSession) -> dict:
     # Anthropic agent — ₹2,500 budget, keyboards only
     anthropic_priv, anthropic_pub = CryptoService.generate_keypair()
     anthropic_scope = json.dumps({"sku": [], "category": ["mechanical-keyboards"], "vendor": []})
-    anthropic_mandate_id = str(uuid.uuid4())
+    anthropic_mandate_id = "b29e83db-ee84-4e4b-9651-03d7aa741a39" # Deterministic for testing
     canonical2 = CryptoService.build_mandate_canonical({
         "agent_id": "anthropic-demo-agent",
         "principal_id": "human-principal",

@@ -219,8 +219,8 @@ class OrderService:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def simulate_payment(self, order_id: str) -> dict:
-        """Simulate a successful Razorpay payment to trigger the rest of the flow."""
+    async def verify_payment(self, order_id: str, razorpay_payment_id: str, razorpay_order_id: str, razorpay_signature: str) -> dict:
+        """Verify the payment signature and capture the order."""
         order = await self.get_order(order_id)
         if not order:
             return {"success": False, "error": "Order not found"}
@@ -228,11 +228,81 @@ class OrderService:
         if order.status != OrderStatus.CREATED.value:
             return {"success": False, "error": f"Cannot pay order in status {order.status}"}
             
+        if not self.razorpay.verify_payment_signature(razorpay_order_id, razorpay_payment_id, razorpay_signature):
+            return {"success": False, "error": "Invalid signature"}
+
         order.transition_to(OrderStatus.CAPTURED)
+        
+        # Trigger upsell analysis just like the webhook would
+        from app.services.upsell_service import UpsellService
+        if order.items:
+            upsell_service = UpsellService(self.db)
+            source_sku = order.items[0].sku
+            await upsell_service.get_recommendation(
+                source_sku=source_sku,
+                source_order_id=order.id,
+            )
+            
         await self.db.commit()
         
-        logger.info("Simulated payment successful", order_id=order_id)
+        logger.info("Payment verified and captured", order_id=order_id)
         return {"success": True, "order_id": order_id, "status": "captured"}
+
+    async def simulate_payment(self, order_id: str) -> dict:
+        """Automate Razorpay checkout via Playwright to simulate a real payment."""
+        order = await self.get_order(order_id)
+        if not order:
+            return {"success": False, "error": "Order not found"}
+        
+        from app.core.config import get_settings
+        settings = get_settings()
+        # Ensure we run Playwright locally
+        import asyncio
+        from playwright.async_api import async_playwright
+
+        async def run_playwright():
+            try:
+                async with async_playwright() as p:
+                    # Launch headlessly with disabled security to allow Razorpay iframe
+                    browser = await p.chromium.launch(
+                        headless=True,
+                        args=['--disable-web-security', '--disable-features=IsolateOrigins,site-per-process']
+                    )
+                    context = await browser.new_context(
+                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+                    )
+                    page = await context.new_page()
+                    
+                    page.on("console", lambda msg: logger.info(f"Playwright Console: {msg.text}"))
+                    page.on("pageerror", lambda err: logger.error(f"Playwright Page Error: {err.message}"))
+                    
+                    # Assuming the server is running on localhost:8000
+                    checkout_url = f"http://127.0.0.1:8000/checkout/{order_id}?mock=true"
+                    logger.info("Opening Playwright for mock checkout", url=checkout_url)
+                    
+                    await page.goto(checkout_url, wait_until="networkidle")
+                    
+                    # Click the mock pay button
+                    pay_btn = page.locator("#mock-pay-button")
+                    await pay_btn.click()
+                    
+                    # The fetch will run and POST back to our server
+                    # We wait for the success marker div to appear on our local checkout page
+                    success_marker = page.locator("#payment-success-marker")
+                    await success_marker.wait_for(state="visible", timeout=15000)
+                    
+                    await browser.close()
+                    return {"success": True, "order_id": order_id, "status": "captured"}
+            except Exception as e:
+                try:
+                    await page.screenshot(path=f"playwright_error_{order_id}.png")
+                except:
+                    pass
+                logger.error("Playwright checkout failed", error=str(e))
+                return {"success": False, "error": str(e)}
+
+        result = await run_playwright()
+        return result
 
     async def get_order_by_razorpay_id(self, razorpay_order_id: str) -> Order | None:
         """Fetch an order by Razorpay order ID."""

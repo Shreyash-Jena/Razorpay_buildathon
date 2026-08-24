@@ -125,3 +125,20 @@ class RazorpayClient:
         except Exception as e:
             logger.error("Webhook signature verification failed", error=str(e))
             return False
+
+    def verify_payment_signature(self, razorpay_order_id: str, razorpay_payment_id: str, razorpay_signature: str) -> bool:
+        """Verify frontend checkout payment signature."""
+        client = self._get_client()
+        if client is None:
+            return True
+        try:
+            params = {
+                'razorpay_order_id': razorpay_order_id,
+                'razorpay_payment_id': razorpay_payment_id,
+                'razorpay_signature': razorpay_signature
+            }
+            client.utility.verify_payment_signature(params)
+            return True
+        except Exception as e:
+            logger.error("Payment signature verification failed", error=str(e))
+            return False

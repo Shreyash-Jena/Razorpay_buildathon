@@ -208,7 +208,6 @@ async def main():
         print("   uvicorn app.main:app --reload")
         return
 
-    # Resolve mandate ID from environment
     env_key = "OPENAI_MANDATE_ID" if AGENT_ID == "openai-demo-agent" else "ANTHROPIC_MANDATE_ID"
     mandate_id = os.environ.get(env_key, "")
 
@@ -218,7 +217,11 @@ async def main():
         print(f"   Then add {env_key} to your .env file.")
         return
 
-    goal = AGENT_GOALS.get(AGENT_ID, AGENT_GOALS["openai-demo-agent"])
+    override_goal = os.environ.get("OVERRIDE_GOAL")
+    if override_goal:
+        goal = override_goal
+    else:
+        goal = AGENT_GOALS.get(AGENT_ID, AGENT_GOALS["openai-demo-agent"])
 
     await run_agent(
         user_goal=goal,
