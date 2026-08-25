@@ -123,9 +123,10 @@ async def render_checkout(
                       }});
                 }},
                 "prefill": {{
-                    "name": "Test User",
-                    "email": "test@example.com",
-                    "contact": "9999999999"
+                    "name": "Procurement Agent",
+                    "email": "agent@buildathon.ai",
+                    "contact": "9876543210",
+                    "method": "netbanking"
                 }},
                 "theme": {{
                     "color": "#3399cc"

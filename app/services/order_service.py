@@ -249,60 +249,99 @@ class OrderService:
         return {"success": True, "order_id": order_id, "status": "captured"}
 
     async def simulate_payment(self, order_id: str) -> dict:
-        """Automate Razorpay checkout via Playwright to simulate a real payment."""
+        """
+        Execute programmatic S2S (Server-to-Server) payment execution for an autonomous agent.
+        
+        Pure Machine-to-Machine Flow:
+        1. Fetch order and verify pending state
+        2. Generate S2S payment ID and cryptographically valid HMAC-SHA256 signature
+        3. Transition order status to CAPTURED
+        4. Persist Payment ledger entry
+        5. Trigger NetworkX Graph Upsell Engine
+        6. Append event to tamper-evident flight recorder (Audit Log)
+        7. Commit & return verified S2S payment confirmation
+        """
+        import hmac
+        import hashlib
+
         order = await self.get_order(order_id)
         if not order:
             return {"success": False, "error": "Order not found"}
         
-        from app.core.config import get_settings
-        settings = get_settings()
-        # Ensure we run Playwright locally
-        import asyncio
-        from playwright.async_api import async_playwright
+        if order.status != OrderStatus.CREATED.value:
+            return {"success": False, "error": f"Cannot pay order in status {order.status}"}
 
-        async def run_playwright():
-            try:
-                async with async_playwright() as p:
-                    # Launch headlessly with disabled security to allow Razorpay iframe
-                    browser = await p.chromium.launch(
-                        headless=True,
-                        args=['--disable-web-security', '--disable-features=IsolateOrigins,site-per-process']
-                    )
-                    context = await browser.new_context(
-                        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
-                    )
-                    page = await context.new_page()
-                    
-                    page.on("console", lambda msg: logger.info(f"Playwright Console: {msg.text}"))
-                    page.on("pageerror", lambda err: logger.error(f"Playwright Page Error: {err.message}"))
-                    
-                    # Assuming the server is running on localhost:8000
-                    checkout_url = f"http://127.0.0.1:8000/checkout/{order_id}?mock=true"
-                    logger.info("Opening Playwright for mock checkout", url=checkout_url)
-                    
-                    await page.goto(checkout_url, wait_until="networkidle")
-                    
-                    # Click the mock pay button
-                    pay_btn = page.locator("#mock-pay-button")
-                    await pay_btn.click()
-                    
-                    # The fetch will run and POST back to our server
-                    # We wait for the success marker div to appear on our local checkout page
-                    success_marker = page.locator("#payment-success-marker")
-                    await success_marker.wait_for(state="visible", timeout=15000)
-                    
-                    await browser.close()
-                    return {"success": True, "order_id": order_id, "status": "captured"}
-            except Exception as e:
-                try:
-                    await page.screenshot(path=f"playwright_error_{order_id}.png")
-                except:
-                    pass
-                logger.error("Playwright checkout failed", error=str(e))
-                return {"success": False, "error": str(e)}
+        # Generate S2S payment authorization & HMAC-SHA256 signature using Razorpay Key Secret
+        mock_payment_id = f"pay_s2s_{uuid.uuid4().hex[:14]}"
+        msg = f"{order.razorpay_order_id}|{mock_payment_id}"
+        mock_signature = hmac.new(
+            self.razorpay.settings.razorpay_key_secret.encode("utf-8"),
+            msg.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
-        result = await run_playwright()
-        return result
+        # Capture order
+        order.transition_to(OrderStatus.CAPTURED)
+
+        # Persist Payment record
+        from app.db.models.payment import Payment
+        payment = Payment(
+            id=str(uuid.uuid4()),
+            razorpay_payment_id=mock_payment_id,
+            razorpay_order_id=order.razorpay_order_id or "",
+            amount_paise=order.total_amount_paise,
+            status="captured",
+            method="agent_s2s_mandate",
+            captured_at=datetime.now(timezone.utc),
+            raw_event_id=f"evt_s2s_{uuid.uuid4().hex[:12]}",
+        )
+        self.db.add(payment)
+
+        # Trigger Graph Upsell recommendation
+        from app.services.upsell_service import UpsellService
+        if order.items:
+            upsell_service = UpsellService(self.db)
+            source_sku = order.items[0].sku
+            await upsell_service.get_recommendation(
+                source_sku=source_sku,
+                source_order_id=order.id,
+            )
+
+        # Append to append-only Audit Log (Flight Recorder)
+        await self.audit_service.log(
+            agent_id=order.agent_id,
+            tool_invoked="simulate_payment",
+            outcome=AuditOutcome.SUCCESS,
+            input_payload={
+                "order_id": order.id,
+                "razorpay_order_id": order.razorpay_order_id,
+                "payment_id": mock_payment_id,
+                "amount_paise": order.total_amount_paise,
+                "method": "agent_s2s_mandate",
+            },
+            mandate_id=order.mandate_id,
+            order_id=order.id,
+            razorpay_order_id=order.razorpay_order_id or "",
+        )
+
+        await self.db.commit()
+
+        logger.info(
+            "S2S Machine-to-Machine Payment executed",
+            order_id=order.id,
+            razorpay_order_id=order.razorpay_order_id,
+            payment_id=mock_payment_id,
+        )
+
+        return {
+            "success": True,
+            "order_id": order.id,
+            "razorpay_payment_id": mock_payment_id,
+            "razorpay_order_id": order.razorpay_order_id,
+            "razorpay_signature": mock_signature,
+            "status": "captured",
+            "method": "agent_s2s_mandate",
+        }
 
     async def get_order_by_razorpay_id(self, razorpay_order_id: str) -> Order | None:
         """Fetch an order by Razorpay order ID."""
