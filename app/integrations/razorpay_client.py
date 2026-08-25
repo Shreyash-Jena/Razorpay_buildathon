@@ -106,6 +106,40 @@ class RazorpayClient:
             logger.error("Failed to fetch payment", payment_id=payment_id, error=str(e))
             return {}
 
+    async def create_payment_link(
+        self,
+        amount_paise: int,
+        currency: str = "INR",
+        description: str = "",
+        customer_email: str = "agent@buildathon.ai",
+        customer_contact: str = "9876543210",
+        notes: dict | None = None,
+    ) -> dict:
+        """Create a Razorpay hosted payment link."""
+        client = self._get_client()
+        if client is None:
+            return {"id": "plink_mock", "short_url": "https://rzp.io/mock"}
+        try:
+            import asyncio
+            data = {
+                "amount": amount_paise,
+                "currency": currency,
+                "description": description,
+                "customer": {
+                    "name": "Autonomous Procurement Agent",
+                    "email": customer_email,
+                    "contact": customer_contact,
+                },
+                "notes": notes or {},
+                "notify": {"sms": False, "email": False},
+            }
+            link = await asyncio.to_thread(client.payment_link.create, data=data)
+            logger.info("Razorpay payment link created", link_id=link.get("id"), url=link.get("short_url"))
+            return link
+        except Exception as e:
+            logger.error("Failed to create payment link", error=str(e))
+            return {}
+
     def verify_webhook_signature(self, body: str, signature: str) -> bool:
         """
         Verify Razorpay webhook signature.
