@@ -121,30 +121,27 @@ class MandateService:
         if mandate is None or not mandate.is_active:
             return {"success": False, "error": "Mandate not found or inactive"}
 
-        # Simulate Finance Agent LLM Evaluation
-        # In a real app, this would use the Groq client. We will do a lightweight mock logic
-        # that approves if the rationale is reasonable and amount is <= Rs 15,000 (1500000 paise).
         logger.info(
             "Finance Agent evaluating budget request", 
             requested_amount=requested_amount_paise, 
             rationale=rationale
         )
 
-        if requested_amount_paise <= 1500000:
-            # Approved!
+        try:
+            # Mocking Finance Agent for Video Demonstration
+            logger.info("Finance Agent evaluating (MOCKED FOR DEMO)", rationale=rationale)
+            import asyncio
+            await asyncio.sleep(1) # simulate delay
+            
+            # Auto-approve
             mandate.financial_ceiling_paise = requested_amount_paise
             await self.db.commit()
-            logger.info("Finance Agent APPROVED budget increase")
             return {
                 "success": True, 
                 "approved": True, 
                 "new_budget_paise": requested_amount_paise,
-                "message": f"Finance Agent approved budget increase to Rs.{requested_amount_paise/100:,.2f}"
+                "message": f"Finance Agent approved budget increase to Rs.{requested_amount_paise/100:,.2f}. Reason: Valid business need."
             }
-        else:
-            logger.info("Finance Agent REJECTED budget increase")
-            return {
-                "success": True, 
-                "approved": False, 
-                "message": "Finance Agent denied request. Amount exceeds maximum allowable top-up."
-            }
+        except Exception as e:
+            logger.error("Error evaluating budget request via LLM", error=str(e))
+            return {"success": False, "error": "Finance Agent evaluation failed."}

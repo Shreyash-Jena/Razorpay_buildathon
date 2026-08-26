@@ -267,7 +267,7 @@ async def seed_all(db: AsyncSession) -> dict:
         id=anthropic_mandate_id,
         agent_id="anthropic-demo-agent",
         principal_id="human-principal",
-        financial_ceiling_paise=250000,
+        financial_ceiling_paise=1000000,
         scope_values=anthropic_scope,
         max_transactions=3,
         velocity_window_seconds=86400,

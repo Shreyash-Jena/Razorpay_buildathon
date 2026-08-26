@@ -13,6 +13,7 @@ class CreateOrderRequest(BaseModel):
     rationale: str = Field(default="", description="Agent's reasoning for this purchase")
     nonce: str = Field(..., description="Unique nonce for replay protection")
     signed_intent: str = Field(default="", description="Ed25519 signature of canonical intent")
+    payment_mode: str = Field(default="b2b", description="b2b (Smart Collect) or b2c (Tokenized)")
 
 
 class OrderResponse(BaseModel):
@@ -27,6 +28,8 @@ class OrderResponse(BaseModel):
     currency: str = "INR"
     status: str = ""
     receipt: str = ""
+    virtual_account_id: str = ""
+    payment_mode: str = "b2b"
 
 
 class OrderStatusResponse(BaseModel):

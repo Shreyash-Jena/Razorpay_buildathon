@@ -23,6 +23,7 @@ class Order(Base):
     currency: Mapped[str] = mapped_column(String(10), default="INR")
     status: Mapped[str] = mapped_column(String(30), default=OrderStatus.PENDING_EXTERNAL.value)
     idempotency_key: Mapped[str] = mapped_column(String(200), unique=True, nullable=False)
+    payment_mode: Mapped[str] = mapped_column(String(10), default="b2b")
     receipt: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)

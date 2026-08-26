@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     razorpay_key_id: str = Field(default="", description="Razorpay test-mode key ID")
     razorpay_key_secret: str = Field(default="", description="Razorpay test-mode secret")
     razorpay_webhook_secret: str = Field(default="", description="Razorpay webhook secret")
+    
+    razorpay_b2c_key_id: str = Field(default="", description="Razorpay test-mode key ID for B2C")
+    razorpay_b2c_key_secret: str = Field(default="", description="Razorpay test-mode secret for B2C")
+    razorpay_b2c_customer_id: str = Field(default="", description="Razorpay B2C customer ID")
+    razorpay_b2c_token_id: str = Field(default="", description="Razorpay B2C token ID")
 
     # --- LLM Agent API Keys ---
     openai_api_key: str = Field(default="", description="OpenAI API key")

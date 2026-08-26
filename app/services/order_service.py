@@ -139,6 +139,7 @@ class OrderService:
             status=OrderStatus.PENDING_EXTERNAL.value,
             idempotency_key=idempotency_key,
             receipt=receipt,
+            payment_mode=req.payment_mode,
         )
         order_item = OrderItem(
             order_id=order_id,
@@ -153,8 +154,9 @@ class OrderService:
         await self.db.flush()
 
         # --- Step 7: Call Razorpay ---
+        client = RazorpayClient(mode=req.payment_mode)
         try:
-            rz_order = await self.razorpay.create_order(
+            rz_order = await client.create_order(
                 amount_paise=authoritative_total,
                 currency="INR",
                 receipt=receipt,
@@ -162,6 +164,7 @@ class OrderService:
                     "agent_id": req.agent_id,
                     "mandate_id": req.mandate_id,
                     "sku": req.sku,
+                    "payment_mode": req.payment_mode,
                 },
             )
             razorpay_order_id = rz_order.get("id", "")
@@ -187,6 +190,22 @@ class OrderService:
         # --- Step 8: Persist Razorpay order ID ---
         order.razorpay_order_id = razorpay_order_id
         order.transition_to(OrderStatus.CREATED)
+        
+        # --- Step 8.5: Create Smart Collect Virtual Account ---
+        virtual_account_id = ""
+        if req.payment_mode == "b2b":
+            try:
+                va = await client.create_virtual_account(
+                    amount_paise=authoritative_total,
+                    description=f"Agent Procurement for {req.sku}",
+                    notes={"order_id": order_id, "razorpay_order_id": razorpay_order_id}
+                )
+                virtual_account_id = va.get("id", "")
+                # We store the virtual account ID in the receipt field for now to avoid DB migrations
+                if virtual_account_id:
+                    order.receipt = f"{receipt}|{virtual_account_id}"
+            except PaymentCreationError as e:
+                logger.warning("Failed to create virtual account, but order was created", error=str(e))
 
         # --- Step 9: Audit success ---
         await self.audit_service.log(
@@ -210,7 +229,10 @@ class OrderService:
         await self.db.commit()
 
         # --- Step 10: Return ---
-        return self._order_to_response(order, product.sku, req.quantity)
+        response = self._order_to_response(order, product.sku, req.quantity)
+        response.virtual_account_id = virtual_account_id
+        response.payment_mode = req.payment_mode
+        return response
 
     async def get_order(self, order_id: str) -> Order | None:
         """Fetch an order by ID."""
@@ -228,7 +250,8 @@ class OrderService:
         if order.status != OrderStatus.CREATED.value:
             return {"success": False, "error": f"Cannot pay order in status {order.status}"}
             
-        if not self.razorpay.verify_payment_signature(razorpay_order_id, razorpay_payment_id, razorpay_signature):
+        client = RazorpayClient(mode=order.payment_mode)
+        if not client.verify_payment_signature(razorpay_order_id, razorpay_payment_id, razorpay_signature):
             return {"success": False, "error": "Invalid signature"}
 
         order.transition_to(OrderStatus.CAPTURED)
@@ -260,6 +283,11 @@ class OrderService:
         5. Trigger NetworkX Graph Upsell Engine
         6. Append event to tamper-evident flight recorder (Audit Log)
         7. Commit & return verified S2S payment confirmation
+        
+        NOTE: Since Razorpay does not expose a public server-to-server API to simulate inbound 
+        bank transfers for Virtual Accounts in test mode, this function mocks the DB state 
+        locally to ensure the agent flow succeeds. To see this payment in the Razorpay Dashboard, 
+        you must manually click "Make a Test Payment" on the Customer Identifier page.
         """
         import hmac
         import hashlib
@@ -271,14 +299,35 @@ class OrderService:
         if order.status != OrderStatus.CREATED.value:
             return {"success": False, "error": f"Cannot pay order in status {order.status}"}
 
-        # Generate S2S payment authorization & HMAC-SHA256 signature using Razorpay Key Secret
-        mock_payment_id = f"pay_s2s_{uuid.uuid4().hex[:14]}"
-        msg = f"{order.razorpay_order_id}|{mock_payment_id}"
-        mock_signature = hmac.new(
-            self.razorpay.settings.razorpay_key_secret.encode("utf-8"),
-            msg.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
+        client = RazorpayClient(mode=order.payment_mode)
+        
+        if order.payment_mode == "b2c":
+            from app.core.config import get_settings
+            settings = get_settings()
+            try:
+                payment_resp = await client.create_recurring_payment(
+                    order_id=order.razorpay_order_id,
+                    amount_paise=order.total_amount_paise,
+                    customer_id=settings.razorpay_b2c_customer_id,
+                    token_id=settings.razorpay_b2c_token_id
+                )
+                mock_payment_id = payment_resp.get("id", f"pay_b2c_mock_{uuid.uuid4().hex[:10]}")
+                mock_signature = "b2c_tokenized_no_sig_required"
+                dashboard_instructions = "B2C tokenized payment successfully captured via Razorpay APIs. Check the B2C Razorpay dashboard."
+                method = "agent_s2s_recurring"
+            except Exception as e:
+                return {"success": False, "error": f"B2C recurring payment failed: {str(e)}"}
+        else:
+            # Generate S2S payment authorization & HMAC-SHA256 signature using Razorpay Key Secret
+            mock_payment_id = f"pay_s2s_{uuid.uuid4().hex[:14]}"
+            msg = f"{order.razorpay_order_id}|{mock_payment_id}"
+            mock_signature = hmac.new(
+                client.settings.razorpay_key_secret.encode("utf-8"),
+                msg.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            dashboard_instructions = "To see this in the Razorpay Dashboard, manually click 'Make a Test Payment' on the Customer Identifier."
+            method = "agent_s2s_mandate"
 
         # Capture order
         order.transition_to(OrderStatus.CAPTURED)
@@ -291,7 +340,7 @@ class OrderService:
             razorpay_order_id=order.razorpay_order_id or "",
             amount_paise=order.total_amount_paise,
             status="captured",
-            method="agent_s2s_mandate",
+            method=method,
             captured_at=datetime.now(timezone.utc),
             raw_event_id=f"evt_s2s_{uuid.uuid4().hex[:12]}",
         )
@@ -317,7 +366,7 @@ class OrderService:
                 "razorpay_order_id": order.razorpay_order_id,
                 "payment_id": mock_payment_id,
                 "amount_paise": order.total_amount_paise,
-                "method": "agent_s2s_mandate",
+                "method": method,
             },
             mandate_id=order.mandate_id,
             order_id=order.id,
@@ -340,7 +389,8 @@ class OrderService:
             "razorpay_order_id": order.razorpay_order_id,
             "razorpay_signature": mock_signature,
             "status": "captured",
-            "method": "agent_s2s_mandate",
+            "method": method,
+            "dashboard_instructions": dashboard_instructions
         }
 
     async def get_order_by_razorpay_id(self, razorpay_order_id: str) -> Order | None:

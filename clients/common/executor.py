@@ -37,6 +37,7 @@ async def execute_tool(
                 "rationale": arguments.get("rationale", ""),
                 "nonce": str(uuid.uuid4()),
                 "signed_intent": "",  # Demo mode — signature optional
+                "payment_mode": "b2c" if agent_id.startswith("anthropic") else "b2b",
             }
             resp = await client.post("/orders", json=payload)
             try:
