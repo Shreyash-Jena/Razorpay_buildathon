@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 import json
+import subprocess
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -147,6 +148,10 @@ async def test_scenario_e():
 
 async def main():
     try:
+        print("Starting clean slate: Seeding database...")
+        subprocess.run([sys.executable, "scripts/seed_catalog.py"], check=True, env={**os.environ, "PYTHONPATH": "."})
+        print("Database seeded successfully.\n")
+        
         await test_scenario_a()
         print("\n" + "="*80 + "\n")
         await test_scenario_b()
