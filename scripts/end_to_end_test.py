@@ -4,6 +4,10 @@ import sys
 import json
 import subprocess
 
+# Ensure stdout uses UTF-8 to prevent charmap errors on Windows
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
+
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
